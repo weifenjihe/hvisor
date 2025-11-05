@@ -24,7 +24,8 @@ pub const MEM_TYPE_VIRTIO: u32 = 2;
 
 pub const CONFIG_MAGIC_VERSION: usize = 0x3;
 pub const CONFIG_MAX_MEMORY_REGIONS: usize = 64;
-pub const CONFIG_MAX_INTERRUPTS: usize = 32;
+pub const CONFIG_MAX_INTERRUPTS: usize = 64;
+// pub const CONFIG_MAX_INTERRUPTS: usize = 32;
 pub const CONFIG_NAME_MAXLEN: usize = 32;
 pub const CONFIG_MAX_IVC_CONFIGS: usize = 2;
 pub const CONFIG_MAX_PCI_DEV: usize = 32;
