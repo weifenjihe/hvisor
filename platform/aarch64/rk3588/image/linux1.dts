@@ -2481,7 +2481,7 @@
 		interrupt-parent = <0x01>;
 		interrupts = <0x00 0x20 0x01>;
 	};
-	
+
 	usbdrd3_0 {
 		compatible = "rockchip,rk3588-dwc3\0rockchip,rk3399-dwc3";
 		clocks = <0x02 0x1a3 0x02 0x1a2 0x02 0x1a1>;
@@ -11607,11 +11607,6 @@
 		phandle = <0x11a>;
 	};
 
-	memory@50000000 {
-        device_type = "memory";
-        reg = <0x00 0x50000000 0x00 0x30000000>;
-    };
-
 	reserved-memory {
 		#address-cells = <0x02>;
 		#size-cells = <0x02>;
@@ -11650,10 +11645,14 @@
 			no-map;
 			reg = <0x00 0x480000 0x00 0x400000>;
 		};
-		sel4@52000000 {
-            reg = <0x00 0x52000000 0x00 0x08000000>; 
+		sel4@50000000 {
+            reg = <0x00 0x50000000 0x00 0x30000000>; 
             no-map;
         };
+		virtio-dma@9400000 {
+			reg = <0x0 0x09400000 0x0 0x10000>;
+			no-map;
+		};
 	};
 
 	es8388-sound {
