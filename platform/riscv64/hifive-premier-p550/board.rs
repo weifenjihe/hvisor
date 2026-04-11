@@ -31,7 +31,7 @@ pub const ROOT_ZONE_CPUS: u64 = 0x1;
 
 pub const ROOT_ZONE_NAME: &str = "root-linux";
 
-pub const ROOT_ZONE_MEMORY_REGIONS: [HvConfigMemoryRegion; 7] = [
+pub const ROOT_ZONE_MEMORY_REGIONS: [HvConfigMemoryRegion; 11] = [
     HvConfigMemoryRegion {
         mem_type: MEM_TYPE_RAM,
         physical_start: 0x80000000,
@@ -79,7 +79,7 @@ pub const ROOT_ZONE_MEMORY_REGIONS: [HvConfigMemoryRegion; 7] = [
         physical_start: 0x50460000,
         virtual_start: 0x50460000,
         size: 0x10000,
-    }, // mmc
+    }, // sdio0 (sd-card)
     HvConfigMemoryRegion {
         mem_type: MEM_TYPE_IO,
         physical_start: 0x50440000,
@@ -92,6 +92,18 @@ pub const ROOT_ZONE_MEMORY_REGIONS: [HvConfigMemoryRegion; 7] = [
         virtual_start: 0x51828000,
         size: 0x80000,
     }, // sys-crg (clock-controller, reset-controller) (SD card needs)
+    HvConfigMemoryRegion {
+        mem_type: MEM_TYPE_IO,
+        physical_start: 0x51810000,
+        virtual_start: 0x51810000,
+        size: 0x8000,
+    }, // scu_sys_con (for iommu syscfg)
+    HvConfigMemoryRegion {
+        mem_type: MEM_TYPE_IO,
+        physical_start: 0x50c00000,
+        virtual_start: 0x50c00000,
+        size: 0x100000,
+    }, // iommu (smmu-v3)
     // Cache controller is needed, otherwise terminal will report "VFS: cannot open root device..."
     HvConfigMemoryRegion {
         mem_type: MEM_TYPE_IO,
@@ -112,6 +124,22 @@ pub const ROOT_ZONE_MEMORY_REGIONS: [HvConfigMemoryRegion; 7] = [
         // mem-port -> sys-port (here easily equal to mem size), this is needed for uncache access in eic7700x soc.
         size: 0x4_0000_0000,
     }, // Sys-port. (here related to DMA)
+    HvConfigMemoryRegion {
+        mem_type: MEM_TYPE_RAM,
+        physical_start: 0x8000_00000,
+        virtual_start: 0x8000_00000,
+        // Non-coherent alias window observed from guest-page-fault GPA (e.g. 0x87ffff000).
+        // Keep this as a mirror of the 2GB DDR span and allow execute permissions.
+        size: 0x8000_0000,
+    }, // DDR non-coherent alias window
+    HvConfigMemoryRegion {
+        mem_type: MEM_TYPE_RAM,
+        physical_start: 0x1_0000_0000,
+        virtual_start: 0x1_0000_0000,
+        // Additional high-address alias window observed from GPA 0x100000028.
+        // Expanded to 512MB to include 0x110000000 boundary accesses.
+        size: 0x2000_0000,
+    }, // High DMA alias window (4GB+)
        // HvConfigMemoryRegion {
        //     mem_type: MEM_TYPE_IO,
        //     physical_start:  0x104000,
@@ -140,16 +168,24 @@ pub const ROOT_ZONE_MEMORY_REGIONS: [HvConfigMemoryRegion; 7] = [
 
 // Note: all here's irqs are hardware irqs,
 //  only these irq can be transferred to the physical PLIC.
-pub const HW_IRQS: [u32; 3] = [
+pub const HW_IRQS: [u32; 7] = [
     0x4f, // emmc
     0x51, // sd-card
-    0x64  // uart0
+    0x64, // uart0
+    0x164, // smmu eventq
+    0x165, // smmu priq
+    0x166, // smmu cmdq-sync
+    0x168, // smmu gerror
 ];
 
 // irqs belong to the root zone.
-pub const ROOT_ZONE_IRQS: [u32; 2] = [
+pub const ROOT_ZONE_IRQS: [u32; 6] = [
     0x51, // sd-card
-    0x64  // uart0
+    0x64, // uart0
+    0x164, // smmu eventq
+    0x165, // smmu priq
+    0x166, // smmu cmdq-sync
+    0x168, // smmu gerror
 ];
 
 pub const ROOT_ARCH_ZONE_CONFIG: HvArchZoneConfig = HvArchZoneConfig {

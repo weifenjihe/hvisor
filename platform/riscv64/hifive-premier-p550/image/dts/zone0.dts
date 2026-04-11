@@ -145,14 +145,14 @@
 			phandle = <0x16>;
 
 			reset-controller {
-				compatible = "eswin,win2030-reset";
+				compatible = "eswin,eic7700-reset";
 				#reset-cells = <0x02>;
 				status = "okay";
 				phandle = <0x18>;
 			};
 
 			clock-controller {
-				compatible = "eswin,win2030-clock";
+				compatible = "eswin,eic7700-clock";
 				#clock-cells = <0x01>;
 				status = "okay";
 				force-1_8ghz;
@@ -160,11 +160,36 @@
 			};
 		};
 
+		scu_sys_con@0x51810000 {
+			compatible = "eswin,win2030-scu-sys-con\0syscon\0simple-mfd";
+			#syscon-cells = <0x02>;
+			#size-cells = <0x02>;
+			reg = <0x00 0x51810000 0x00 0x8000>;
+			numa-node-id = <0x00>;
+			phandle = <0x1b>;
+		};
+
 		hsp_sp_top_csr@0x50440000 {
 			compatible = "eswin,win2030-hsp-sp-csr\0syscon";
 			#size-cells = <0x02>;
 			reg = <0x00 0x50440000 0x00 0x2000>;
 			phandle = <0x1a>;
+		};
+
+		iommu@50c00000 {
+			compatible = "arm,smmu-v3";
+			reg = <0x00 0x50c00000 0x00 0x100000>;
+			eswin,syscfg = <0x1b 0x3fc>;
+			interrupt-parent = <0x10>;
+			interrupts = <0x164 0x168 0x165 0x166>;
+			interrupt-names = "eventq\0gerror\0priq\0cmdq-sync";
+			#iommu-cells = <0x01>;
+			resets = <0x18 0x05 0x01 0x18 0x05 0x02 0x18 0x05 0x10 0x18 0x05 0x20 0x18 0x05 0x40 0x18 0x05 0x80 0x18 0x05 0x100 0x18 0x05 0x200 0x18 0x05 0x400 0x18 0x05 0x800>;
+			reset-names = "axi_rst\0cfg_rst\0tbu0_rst\0tbu1_rst\0tbu2_rst\0tbu3_rst\0tbu4_rst\0tbu5_rst\0tbu6_rst\0tbu7_rst";
+			status = "okay";
+			numa-node-id = <0x00>;
+			dma-noncoherent;
+			phandle = <0x1c>;
 		};
 
 		mmc@0x50460000 {
@@ -182,6 +207,9 @@
 			max-frequency = <0xc65d400>;
 			#address-cells = <0x01>;
 			#size-cells = <0x00>;
+			dma-ranges = <0x00 0x20000000 0x00 0xc0000000 0x00 0x40000000>;
+			iommus = <0x1c 0x10>;
+			tbus = <0x02>;
 			eswin,hsp_sp_csr = <0x1a 0x103c 0x608 0x60c>;
 			eswin,syscrg_csr = <0x16 0x164 0x148 0x14c>;
 			bus-width = <0x04>;
@@ -189,14 +217,13 @@
 			numa-node-id = <0x00>;
 			status = "okay";
 			dma-noncoherent;
-			delay_code = <0x3b>;
+			delay_code = <0x55>;
 			drive-impedance-ohm = <0x21>;
 			enable-cmd-pullup;
 			enable-data-pullup;
 			no-sdio;
 			no-mmc;
-			disable-wp;
-			broken-cd;
+			non-removable;
 		};
 	};
 
@@ -234,11 +261,12 @@
 
 	aliases {
 		serial0 = "/soc/serial@0x50900000";
+		mmc0 = "/soc/mmc@0x50460000";
 		// serial2 = "/soc/serial@0x50920000";
 	};
 
 	chosen {
-		bootargs = "earlycon console=ttyS0,115200 root=/dev/mmcblk0p2 rootfstype=ext4 rw rootwait init=/bin/bash";
+		bootargs = "earlycon console=ttyS0,115200 root=/dev/mmcblk0p3 rootfstype=ext4 rw rootwait init=/bin/bash";
 		stdout-path = "serial0:115200n8";
 		// bootargs = "earlycon console=ttyS2,115200 root=/dev/mmcblk0p3 rootfstype=ext4 rw rootwait init=/bin/bash";
 		// stdout-path = "serial2:115200n8";

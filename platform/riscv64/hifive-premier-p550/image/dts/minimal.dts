@@ -326,7 +326,7 @@
 			phandle = <0x12>;
 
 			reset-controller {
-				compatible = "eswin,win2030-reset";
+				compatible = "eswin,eic7700-reset";
 				#reset-cells = <0x02>;
 				numa-node-id = <0x00>;
 				status = "okay";
@@ -334,7 +334,7 @@
 			};
 
 			clock-controller {
-				compatible = "eswin,win2030-clock";
+				compatible = "eswin,eic7700-clock";
 				#clock-cells = <0x01>;
 				numa-node-id = <0x00>;
 				status = "okay";
@@ -579,6 +579,7 @@
 			enable-data-pullup;
 			no-sdio;
 			no-mmc;
+			non-removable;
 		};
 
 		mbox@50a00000 {
@@ -766,10 +767,11 @@
 
 	aliases {
 		serial0 = "/soc/serial@0x50900000";
+		mmc0 = "/soc/mmc@0x50460000";
 	};
 
 	chosen {
-		bootargs = "root=PARTUUID=b0f77ad6-36cd-4a99-a8c0-31d73649aa09 console=ttyS0,115200 root=PARTUUID=b0f77ad6-36cd-4a99-a8c0-31d73649aa09 rootfstype=ext4 rootwait rw earlycon selinux=0 LANG=en_US.UTF-8";
+		bootargs = "root=mmcblk0p3 console=ttyS0,115200 rootfstype=ext4 rootwait rw earlycon selinux=0 LANG=en_US.UTF-8";
 		stdout-path = "serial0:115200n8";
 
 		domain-config {

@@ -22,6 +22,7 @@ use crate::event::check_events;
 use crate::memory::{mmio_handle_access, MMIOAccess};
 use crate::memory::{GuestPhysAddr, HostPhysAddr};
 use crate::percpu::this_cpu_data;
+use crate::percpu::this_zone;
 use crate::platform::__board::*;
 use core::arch::{asm, global_asm};
 use riscv::register::stvec::TrapMode;
@@ -41,6 +42,7 @@ interrupts_arch_handle=sym interrupts_arch_handle);
 pub mod ExceptionType {
     pub const ECALL_VU: usize = 8;
     pub const ECALL_VS: usize = 10;
+    pub const INST_GUEST_PAGE_FAULT: usize = 20;
     pub const LOAD_GUEST_PAGE_FAULT: usize = 21;
     pub const STORE_GUEST_PAGE_FAULT: usize = 23;
 }
@@ -72,6 +74,11 @@ pub const CAUSE_STRINGS: [&str; 24] = [
     "Store/AMO guest-page fault",
 ];
 
+#[inline(always)]
+fn trap_cause_str(code: usize) -> &'static str {
+    CAUSE_STRINGS.get(code).copied().unwrap_or("Unknown trap cause")
+}
+
 #[allow(non_snake_case)]
 pub mod InterruptType {
     pub const SSI: usize = 1;
@@ -99,6 +106,24 @@ pub const INS_RS1_MASK: usize = 0x000f8000;
 pub const INS_RS2_MASK: usize = 0x01f00000;
 pub const INS_RD_MASK: usize = 0x00000f80;
 
+fn decode_standard_ldst_rs1_imm(ins: usize) -> Option<(usize, isize)> {
+    let opcode = ins & INS_OPCODE_MASK;
+    if opcode == OPCODE_LOAD {
+        let rs1 = (ins & INS_RS1_MASK) >> 15;
+        let imm12 = ((ins as isize) << 20) >> 20;
+        Some((rs1, imm12))
+    } else if opcode == OPCODE_STORE {
+        let rs1 = (ins & INS_RS1_MASK) >> 15;
+        let imm_low = (ins >> 7) & 0x1f;
+        let imm_high = (ins >> 25) & 0x7f;
+        let imm12 = (imm_high << 5) | imm_low;
+        let imm12 = ((imm12 as isize) << 52) >> 52;
+        Some((rs1, imm12))
+    } else {
+        None
+    }
+}
+
 /// Set the trap vector.
 pub fn install_trap_vector() {
     use riscv::register::stvec::Stvec;
@@ -116,16 +141,30 @@ pub fn sync_exception_handler(current_cpu: &mut ArchCpu) {
     let trap_code = riscv::register::scause::read().code();
     trace!("CSR_SCAUSE: {}", trap_code);
 
-    if !riscv_h::register::hstatus::read().spv() {
-        warn!("Trap Cause: {}", CAUSE_STRINGS[trap_code]);
-        // Hvisor don't handle sync exception which occurs in hvisor self (HS-mode).
-        // If sync exception occurs, hvisor will panic!
-        panic!("exception from HS mode");
-    }
-
     let trap_value = riscv_h::register::htval::read();
     let trap_ins = riscv_h::register::htinst::read();
     let trap_pc = riscv::register::sepc::read();
+
+    if !riscv_h::register::hstatus::read().spv() {
+        warn!(
+            "HS-mode sync exception on CPU{}: cause={}, sepc={:#x}, htval={:#x}, htinst={:#x}",
+            current_cpu.cpuid,
+            trap_cause_str(trap_code),
+            trap_pc,
+            trap_value,
+            trap_ins
+        );
+        // Avoid crashing on recursive guest-page-faults triggered by debug/inspection paths.
+        if trap_code == ExceptionType::INST_GUEST_PAGE_FAULT
+            || trap_code == ExceptionType::LOAD_GUEST_PAGE_FAULT
+            || trap_code == ExceptionType::STORE_GUEST_PAGE_FAULT
+        {
+            current_cpu.sepc = trap_pc + 4;
+            return;
+        }
+        panic!("exception from HS mode");
+    }
+
     trace!("CSR_HTVAL: {:#x}", trap_value);
     trace!("CSR_HTINST: {:#x}", trap_ins);
     trace!("CSR_SEPC: {:#x}", trap_pc);
@@ -140,6 +179,27 @@ pub fn sync_exception_handler(current_cpu: &mut ArchCpu) {
             trace!("LOAD_GUEST_PAGE_FAULT");
             guest_page_fault_handler(current_cpu);
         }
+        ExceptionType::INST_GUEST_PAGE_FAULT => {
+            use riscv_h::register::{htval, stval};
+            let addr: usize = (htval::read() << 2) | (stval::read() & 0x3);
+            let s2_query = {
+                let zone = this_zone();
+                let zone = zone.read();
+                unsafe { zone.gpm.page_table_query(addr as GuestPhysAddr) }
+            };
+            error!(
+                "Instruction guest-page fault on CPU{}: sepc={:#x}, gpa={:#x}, htval={:#x}, stval={:#x}, htinst={:#x}, s2_query={:#x?}",
+                current_cpu.cpuid,
+                current_cpu.sepc,
+                addr,
+                htval::read(),
+                stval::read(),
+                trap_ins,
+                s2_query
+            );
+            // Keep guest alive for diagnosis.
+            current_cpu.sepc += 4;
+        }
         ExceptionType::STORE_GUEST_PAGE_FAULT => {
             trace!("STORE_GUEST_PAGE_FAULT");
             guest_page_fault_handler(current_cpu);
@@ -149,14 +209,21 @@ pub fn sync_exception_handler(current_cpu: &mut ArchCpu) {
                 "CPU {} sync exception, sepc: {:#x}",
                 current_cpu.cpuid, current_cpu.sepc
             );
-            warn!("Trap Cause: {}", CAUSE_STRINGS[trap_code]);
+            warn!("Trap Cause: {}", trap_cause_str(trap_code));
             warn!("htval: {:#x}, htinst: {:#x}", trap_value, trap_ins);
-            // Some exceptions occur, read_inst may cause load guest-page fault.
-            // Because read_inst use hlvxhu to read instruction from guest memory.
-            let raw_inst = read_inst(trap_pc);
-            let inst = riscv_decode::decode(raw_inst);
-            warn!("trap instruction: {:?}", inst);
-            panic!("Unhandled sync exception");
+            // Avoid nested traps from reading guest instruction bytes here.
+            if trap_ins != 0 {
+                let transformed = trap_ins | 0x2;
+                let inst = riscv_decode::decode(transformed as u32);
+                warn!(
+                    "trap transformed instruction: {:?}, raw_htinst={:#x}",
+                    inst,
+                    trap_ins
+                );
+            } else {
+                warn!("trap transformed instruction: unavailable (htinst=0)");
+            }
+            current_cpu.sepc += 4;
         }
     }
 }
@@ -319,7 +386,47 @@ pub fn guest_page_fault_handler(current_cpu: &mut ArchCpu) {
             }
         }
         Err(e) => {
-            panic!("mmio_handle_access: {:#x?}", e);
+            let htval_raw = htval::read();
+            let stval_raw = stval::read();
+            let htinst_raw = htinst::read();
+            let mut rs1_dbg: isize = -1;
+            let mut rs1_val_dbg: usize = 0;
+            let mut imm_dbg: isize = 0;
+            if let Some((rs1, imm)) = decode_standard_ldst_rs1_imm(trap_ins) {
+                rs1_dbg = rs1 as isize;
+                rs1_val_dbg = current_cpu.x[rs1];
+                imm_dbg = imm;
+            }
+            let s2_query = {
+                let zone = this_zone();
+                let zone = zone.read();
+                unsafe { zone.gpm.page_table_query(addr as GuestPhysAddr) }
+            };
+            error!(
+                "Unhandled MMIO access on CPU{}: addr={:#x}, size={}, is_write={}, value={:#x}, sepc={:#x}, htval={:#x}, stval={:#x}, htinst={:#x}, trap_ins={:#x}, rs1=x{}, rs1_val={:#x}, imm={:#x}, reg=x{}, s2_query={:#x?}, err={:#x?}",
+                current_cpu.cpuid,
+                addr,
+                size,
+                is_write,
+                mmio_access.value,
+                current_cpu.sepc,
+                htval_raw,
+                stval_raw,
+                htinst_raw,
+                trap_ins,
+                rs1_dbg,
+                rs1_val_dbg,
+                imm_dbg,
+                reg,
+                s2_query,
+                e
+            );
+            // For read faults, return a bus-like value and keep running.
+            if !is_write && reg != 0 {
+                current_cpu.x[reg] = usize::MAX;
+            }
+            current_cpu.sepc += ins_size;
+            return;
         }
     }
     debug!("guest page fault at {:#x}, trap_ins: {:08x}, size: {}, is_write: {}, sign_ext: {}, reg: {}", addr, trap_ins, size, is_write, sign_ext, reg);
