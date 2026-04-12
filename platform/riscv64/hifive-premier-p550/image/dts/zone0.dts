@@ -251,6 +251,11 @@
 			no-map;
 			reg = <0x00 0x8f000000 0x00 0x01000000>;
 		};
+		
+		virtio-dma@9400000 {
+			reg = <0x0 0x09400000 0x0 0x10000>;
+			no-map;
+		};
 	};
 
 	hvisor_virtio_device {
