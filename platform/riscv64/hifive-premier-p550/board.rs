@@ -31,12 +31,18 @@ pub const ROOT_ZONE_CPUS: u64 = 0x1;
 
 pub const ROOT_ZONE_NAME: &str = "root-linux";
 
-pub const ROOT_ZONE_MEMORY_REGIONS: [HvConfigMemoryRegion; 11] = [
+pub const ROOT_ZONE_MEMORY_REGIONS: [HvConfigMemoryRegion; 16] = [
     HvConfigMemoryRegion {
         mem_type: MEM_TYPE_RAM,
         physical_start: 0x80000000,
         virtual_start: 0x80000000,
         size: 0x8000_0000,
+    }, // ram
+    HvConfigMemoryRegion {
+        mem_type: MEM_TYPE_RAM,
+        physical_start: 0x9400000,
+        virtual_start: 0x9400000,
+        size: 0x10000,
     }, // ram
     HvConfigMemoryRegion {
         mem_type: MEM_TYPE_IO,
@@ -104,6 +110,24 @@ pub const ROOT_ZONE_MEMORY_REGIONS: [HvConfigMemoryRegion; 11] = [
         virtual_start: 0x50c00000,
         size: 0x100000,
     }, // iommu (smmu-v3)
+    HvConfigMemoryRegion {
+        mem_type: MEM_TYPE_IO,
+        physical_start: 0x50400000,
+        virtual_start: 0x50400000,
+        size: 0x10000,
+    }, // ethernet0
+    HvConfigMemoryRegion {
+        mem_type: MEM_TYPE_IO,
+        physical_start: 0x50410000,
+        virtual_start: 0x50410000,
+        size: 0x10000,
+    }, // ethernet1
+    HvConfigMemoryRegion {
+        mem_type: MEM_TYPE_IO,
+        physical_start: 0x51600000,
+        virtual_start: 0x51600000,
+        size: 0x200000,
+    },
     // Cache controller is needed, otherwise terminal will report "VFS: cannot open root device..."
     HvConfigMemoryRegion {
         mem_type: MEM_TYPE_IO,
@@ -140,6 +164,12 @@ pub const ROOT_ZONE_MEMORY_REGIONS: [HvConfigMemoryRegion; 11] = [
         // Expanded to 512MB to include 0x110000000 boundary accesses.
         size: 0x2000_0000,
     }, // High DMA alias window (4GB+)
+    HvConfigMemoryRegion {
+        mem_type: MEM_TYPE_IO,
+        physical_start: 0x1_2000_0000,
+        virtual_start: 0x1_2000_0000,
+        size: 0x1000,
+    }, // high-address MMIO window (observed fault at 0x120000000)
        // HvConfigMemoryRegion {
        //     mem_type: MEM_TYPE_IO,
        //     physical_start:  0x104000,
@@ -168,10 +198,12 @@ pub const ROOT_ZONE_MEMORY_REGIONS: [HvConfigMemoryRegion; 11] = [
 
 // Note: all here's irqs are hardware irqs,
 //  only these irq can be transferred to the physical PLIC.
-pub const HW_IRQS: [u32; 7] = [
+pub const HW_IRQS: [u32; 9] = [
     0x4f, // emmc
     0x51, // sd-card
     0x64, // uart0
+    0x3d, // ethernet0 macirq
+    0x46, // ethernet1 macirq
     0x164, // smmu eventq
     0x165, // smmu priq
     0x166, // smmu cmdq-sync
@@ -179,9 +211,11 @@ pub const HW_IRQS: [u32; 7] = [
 ];
 
 // irqs belong to the root zone.
-pub const ROOT_ZONE_IRQS: [u32; 6] = [
+pub const ROOT_ZONE_IRQS: [u32; 8] = [
     0x51, // sd-card
     0x64, // uart0
+    0x3d, // ethernet0 macirq
+    0x46, // ethernet1 macirq
     0x164, // smmu eventq
     0x165, // smmu priq
     0x166, // smmu cmdq-sync

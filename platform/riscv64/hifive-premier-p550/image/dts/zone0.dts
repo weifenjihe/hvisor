@@ -89,7 +89,7 @@
 			phandle = <0x15>;
 		};
 
-		interrupt-controller@c000000 {
+		plic: interrupt-controller@c000000 {
 			#interrupt-cells = <0x01>;
 			compatible = "sifive,plic-1.0.0";
 			interrupt-controller;
@@ -138,7 +138,7 @@
 		// 	status = "okay";
 		// };
 
-		sys-crg@51828000 {
+		sys_crg: sys-crg@51828000 {
 			compatible = "eswin,win2030-sys-crg\0syscon\0simple-mfd";
 			reg = <0x00 0x51828000 0x00 0x80000>;
 			numa-node-id = <0x00>;
@@ -169,11 +169,69 @@
 			phandle = <0x1b>;
 		};
 
-		hsp_sp_top_csr@0x50440000 {
+		hsp_sp_top_csr: hsp_sp_top_csr@0x50440000 {
 			compatible = "eswin,win2030-hsp-sp-csr\0syscon";
 			#size-cells = <0x02>;
 			reg = <0x00 0x50440000 0x00 0x2000>;
 			phandle = <0x1a>;
+		};
+
+		pinctrl: pinctrl@0x51600080 {
+			compatible = "eswin,eic7x-pinctrl\0syscon";
+			reg = <0x00 0x51600080 0x00 0x1fff80>;
+			status = "okay";
+
+			gpio106_default: gpio106-default {
+				mux {
+					groups = "gpio106_group";
+					function = "gpio106_func";
+				};
+			};
+		};
+
+		gpio0: gpio@51600000 {
+			#address-cells = <0x01>;
+			#size-cells = <0x00>;
+			compatible = "snps,dw-apb-gpio";
+			reg = <0x00 0x51600000 0x00 0x80>;
+			numa-node-id = <0x00>;
+
+			porta: gpio-port@0 {
+				compatible = "snps,dw-apb-gpio-port";
+				gpio-controller;
+				#gpio-cells = <0x02>;
+				ngpios = <0x20>;
+				reg = <0x00>;
+				interrupt-parent = <&plic>;
+				interrupt-controller;
+				#interrupt-cells = <0x02>;
+				interrupts = <0x12f 0x130 0x131 0x132 0x133 0x134 0x135 0x136 0x137 0x138 0x139 0x13a 0x13b 0x13c 0x13d 0x13e
+					      0x13f 0x140 0x141 0x142 0x143 0x144 0x145 0x146 0x147 0x148 0x149 0x14a 0x14b 0x14c 0x14d 0x14e>;
+			};
+
+			portb: gpio-port@1 {
+				compatible = "snps,dw-apb-gpio-port";
+				gpio-controller;
+				#gpio-cells = <0x02>;
+				ngpios = <0x20>;
+				reg = <0x01>;
+			};
+
+			portc: gpio-port@2 {
+				compatible = "snps,dw-apb-gpio-port";
+				gpio-controller;
+				#gpio-cells = <0x02>;
+				ngpios = <0x20>;
+				reg = <0x02>;
+			};
+
+			portd: gpio-port@3 {
+				compatible = "snps,dw-apb-gpio-port";
+				gpio-controller;
+				#gpio-cells = <0x02>;
+				ngpios = <0x10>;
+				reg = <0x03>;
+			};
 		};
 
 		iommu@50c00000 {
@@ -225,6 +283,80 @@
 			no-mmc;
 			non-removable;
 		};
+
+		ethernet@50400000 {
+			compatible = "eswin,win2030-qos-eth";
+			reg = <0x00 0x50400000 0x00 0x10000>;
+			interrupt-parent = <&plic>;
+			interrupt-names = "macirq";
+			interrupts = <0x3d>;
+			phy-mode = "rgmii-txid";
+			numa-node-id = <0x00>;
+			id = <0x00>;
+			status = "okay";
+			clocks = <0x03 0x226 0x03 0x227 0x03 0x228>;
+			clock-names = "app\0stmmaceth\0tx";
+			resets = <0x18 0x07 0x4000000>;
+			reset-names = "ethrst";
+			tbus = <0x02>;
+			dma-noncoherent;
+			eswin,hsp_sp_csr = <&hsp_sp_top_csr 0x1030 0x100 0x108>;
+			eswin,syscrg_csr = <&sys_crg 0x148 0x14c>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&gpio106_default>;
+			rst-gpios = <&portd 10 1>;
+			eswin,rgmiisel = <&pinctrl 0x290 0x3>;
+			eswin,phyaddr = <0x0>;
+			eswin,dly_hsp_reg = <0x114 0x118 0x11c>;
+			snps,axi-config = <&eth0_axi_cfg>;
+			eswin,led-cfgs = <0x6100 0xa40 0x420>;
+			dly-param-1000m = <0x20202020 0x96205a20 0x20202020>;
+			dly-param-100m = <0x20202020 0x96205a20 0x20202020>;
+			dly-param-10m = <0x00 0x00 0x00>;
+
+			eth0_axi_cfg: stmmac-axi-config {
+				snps,blen = <0x00 0x00 0x00 0x00 0x10 0x08 0x04>;
+				snps,rd_osr_lmt = <0x02>;
+				snps,wr_osr_lmt = <0x02>;
+				snps,lpi_en = <0x00>;
+			};
+		};
+
+		ethernet@50410000 {
+			compatible = "eswin,win2030-qos-eth";
+			reg = <0x00 0x50410000 0x00 0x10000>;
+			interrupt-parent = <&plic>;
+			interrupt-names = "macirq";
+			interrupts = <0x46>;
+			phy-mode = "rgmii-txid";
+			numa-node-id = <0x00>;
+			id = <0x01>;
+			status = "disabled";
+			clocks = <0x03 0x226 0x03 0x227 0x03 0x229>;
+			clock-names = "app\0stmmaceth\0tx";
+			resets = <0x18 0x07 0x2000000>;
+			reset-names = "ethrst";
+			tbus = <0x02>;
+			dma-noncoherent;
+			eswin,hsp_sp_csr = <&hsp_sp_top_csr 0x1034 0x200 0x208>;
+			eswin,syscrg_csr = <&sys_crg 0x148 0x14c>;
+			rst-gpios = <&portd 15 1>;
+			eswin,rgmiisel = <&pinctrl 0x294 0x3>;
+			eswin,phyaddr = <0x0>;
+			eswin,dly_hsp_reg = <0x214 0x218 0x21c>;
+			snps,axi-config = <&eth1_axi_cfg>;
+			eswin,led-cfgs = <0x6100 0xa40 0x420>;
+			dly-param-1000m = <0x20202020 0x46204620 0x20202020>;
+			dly-param-100m = <0x20202020 0x50205020 0x20202020>;
+			dly-param-10m = <0x00 0x00 0x00>;
+
+			eth1_axi_cfg: stmmac-axi-config {
+				snps,blen = <0x00 0x00 0x00 0x00 0x10 0x08 0x04>;
+				snps,rd_osr_lmt = <0x02>;
+				snps,wr_osr_lmt = <0x02>;
+				snps,lpi_en = <0x00>;
+			};
+		};
 	};
 
 	reserved-memory {
@@ -267,6 +399,8 @@
 	aliases {
 		serial0 = "/soc/serial@0x50900000";
 		mmc0 = "/soc/mmc@0x50460000";
+		ethernet0 = "/soc/ethernet@50400000";
+		ethernet1 = "/soc/ethernet@50410000";
 		// serial2 = "/soc/serial@0x50920000";
 	};
 

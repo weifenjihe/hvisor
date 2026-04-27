@@ -27,11 +27,17 @@
             "physical_start": "0x50900000",
             "virtual_start":  "0x50900000",
             "size": "0x10000"
+        },
+        {
+            "type": "virtio",
+            "physical_start": "0x10007000",
+            "virtual_start":  "0x10007000",
+            "size": "0x1000"
         }
     ],
     "interrupts": [48, 76],
     "ivc_configs": [],
-    "kernel_filepath": "./hyperamp-server-image-riscv-hifive-p550",
+    "kernel_filepath": "./virtio_demo-image-riscv-hifive-p550",
     "dtb_filepath": "null",
     "kernel_load_paddr": "0x85000000",
     "dtb_load_paddr":   "0x84000000",
