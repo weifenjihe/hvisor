@@ -14,6 +14,7 @@
 // Authors:
 //
 use core::{ptr, usize};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{error::HvResult, percpu::this_zone, zone::zone_error};
 
@@ -99,9 +100,65 @@ pub fn mmio_handle_access(mmio: &mut MMIOAccess) -> HvResult {
             }
         }
         None => {
-            warn!("Zone {} unhandled mmio fault {:#x?}", zone_id, mmio);
+            // record the miss into a small ring buffer for aggregated inspection
+            record_mmio_miss(zone_id, mmio);
+            // single-line warning to keep logs compact
+            warn!(
+                "Zone {} unhandled mmio addr={:#x} size={} write={} value={:#x}",
+                zone_id,
+                mmio.address,
+                mmio.size,
+                mmio.is_write,
+                mmio.value
+            );
+            maybe_dump_mmio_misses();
             hv_result_err!(EINVAL)
         }
+    }
+}
+
+// Small ring buffer to keep recent unhandled MMIOs so we can dump an aggregated
+// summary instead of a flood of single-line warnings.
+const MMIO_MISS_CAP: usize = 128;
+static MMIO_MISS_IDX: AtomicUsize = AtomicUsize::new(0);
+static mut MMIO_MISSES: [(usize, usize, u8, usize, usize); MMIO_MISS_CAP] = [(0, 0, 0, 0, 0); MMIO_MISS_CAP];
+
+fn record_mmio_miss(zone: usize, mmio: &MMIOAccess) {
+    let idx = MMIO_MISS_IDX.fetch_add(1, Ordering::Relaxed);
+    let slot = idx % MMIO_MISS_CAP;
+    unsafe {
+        MMIO_MISSES[slot] = (
+            mmio.address as usize,
+            mmio.size as usize,
+            if mmio.is_write { 1 } else { 0 },
+            mmio.value as usize,
+            zone as usize,
+        );
+    }
+}
+
+fn maybe_dump_mmio_misses() {
+    let idx = MMIO_MISS_IDX.load(Ordering::Relaxed);
+    // every 32 misses, print an aggregated summary of recent entries
+    if idx > 0 && (idx % 32 == 0) {
+        warn!("--- MMIO miss summary (last {} entries) ---", MMIO_MISS_CAP);
+        unsafe {
+            for i in 0..MMIO_MISS_CAP {
+                let (addr, size, is_write, value, zone) = MMIO_MISSES[i];
+                if addr != 0 {
+                    warn!(
+                        "idx={} zone={} addr={:#x} size={} write={} value={:#x}",
+                        i,
+                        zone,
+                        addr,
+                        size,
+                        is_write != 0,
+                        value
+                    );
+                }
+            }
+        }
+        warn!("--- end mmio miss summary ---");
     }
 }
 

@@ -181,10 +181,23 @@
 			reg = <0x00 0x51600080 0x00 0x1fff80>;
 			status = "okay";
 
+			sdio1_default: sdio1-default {
+				mux {
+					groups = "sdio1_group";
+					function = "sdio1_func";
+				};
+			};
+
 			gpio106_default: gpio106-default {
 				mux {
 					groups = "gpio106_group";
 					function = "gpio106_func";
+				};
+
+				conf {
+					groups = "gpio106_group";
+					input-enable = <0x00>;
+					bias-pull-down = <0x01>;
 				};
 			};
 		};
@@ -284,6 +297,58 @@
 			non-removable;
 		};
 
+		mmc@0x50470000 {
+			compatible = "eswin,sdhci-sdio";
+			reg = <0x00 0x50470000 0x00 0x10000>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&sdio1_default>;
+			interrupt-parent = <0x10>;
+			interrupts = <0x53>;
+			clocks = <0x03 0x22c 0x03 0x222 0x03 0x0c 0x03 0x23>;
+			clock-names = "clk_xin\0clk_ahb\0clk_spll2_fout3\0clk_mux1_1";
+			clock-output-names = "sdio1_cardclock";
+			#clock-cells = <0x00>;
+			resets = <0x18 0x07 0x100 0x18 0x07 0x20 0x18 0x07 0x20000 0x18 0x07 0x200000>;
+			reset-names = "txrx_rst\0phy_rst\0prstn\0arstn";
+			clock-frequency = <0xc65d400>;
+			max-frequency = <0xc65d400>;
+			#address-cells = <0x01>;
+			#size-cells = <0x00>;
+			dma-ranges = <0x00 0x20000000 0x00 0xc0000000 0x00 0x40000000>;
+			iommus = <0x1c 0x11>;
+			tbus = <0x02>;
+			eswin,hsp_sp_csr = <0x1a 0x1040 0x708 0x70c>;
+			eswin,syscrg_csr = <0x16 0x168 0x148 0x14c>;
+			bus-width = <0x04>;
+			sdio-id = <0x01>;
+			numa-node-id = <0x00>;
+			status = "disabled";
+			dma-noncoherent;
+			delay_code = <0x29>;
+			drive-impedance-ohm = <0x21>;
+			enable-cmd-pullup;
+			enable-data-pullup;
+			non-removable;
+			keep-power-in-suspend;
+			no-sd;
+			no-mmc;
+			vqmmc-supply = <&reg_vcc1v8>;
+
+			wifi_aw3155@0 {
+				compatible = "aml_w1_sdio";
+				reg = <0x00>;
+				interrupt-parent = <&porta>;
+				interrupts = <0x0f 0x08>;
+				irq-gpios = <&porta 0x0f 0x00>;
+				rst-gpios = <&portc 0x0f 0x00>;
+			};
+
+			mdhd_wlan {
+				compatible = "android,bcmdhd_wlan";
+				gpio_wl_reg_on = <&portc 0x0f 0x00>;
+			};
+		};
+
 		ethernet@50400000 {
 			compatible = "eswin,win2030-qos-eth";
 			reg = <0x00 0x50400000 0x00 0x10000>;
@@ -320,7 +385,7 @@
 				snps,wr_osr_lmt = <0x02>;
 				snps,lpi_en = <0x00>;
 			};
-		};
+	};
 
 		ethernet@50410000 {
 			compatible = "eswin,win2030-qos-eth";
@@ -369,25 +434,25 @@
 			reg = <0x00 0x80000000 0x00 0x00200000>;
 		};
 
-		hvisor@80200000 {
-			no-map;
-			reg = <0x00 0x80200000 0x00 0x02E00000>;
-		};
-
-		nonroot@0x83000000 {
-			no-map;
-			reg = <0x00 0x83000000 0x00 0x0C000000>;
-		};
-
-		dtbfile@0x8f000000 {
-			no-map;
-			reg = <0x00 0x8f000000 0x00 0x01000000>;
-		};
-		
-		virtio-dma@9400000 {
-			reg = <0x0 0x09400000 0x0 0x10000>;
-			no-map;
-		};
+//		hvisor@80200000 {
+//			no-map;
+//			reg = <0x00 0x80200000 0x00 0x02E00000>;
+//		};
+//
+//		nonroot@0x83000000 {
+//			no-map;
+//			reg = <0x00 0x83000000 0x00 0x0C000000>;
+//		};
+//
+//		dtbfile@0x8f000000 {
+//			no-map;
+//			reg = <0x00 0x8f000000 0x00 0x01000000>;
+//		};
+//		
+//		virtio-dma@9400000 {
+//			reg = <0x0 0x09400000 0x0 0x10000>;
+//			no-map;
+//		};
 	};
 
 	hvisor_virtio_device {
@@ -396,9 +461,17 @@
     	interrupts = <0x20>;
 	};
 
+	reg_vcc1v8: vcc1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc1v8";
+		regulator-min-microvolt = <0x1b7740>;
+		regulator-max-microvolt = <0x1b7740>;
+	};
+
 	aliases {
 		serial0 = "/soc/serial@0x50900000";
 		mmc0 = "/soc/mmc@0x50460000";
+		mmc1 = "/soc/mmc@0x50470000";
 		ethernet0 = "/soc/ethernet@50400000";
 		ethernet1 = "/soc/ethernet@50410000";
 		// serial2 = "/soc/serial@0x50920000";
