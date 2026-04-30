@@ -27,7 +27,7 @@ pub const SIFIVE_CCACHE_SIZE: usize = 0x4000; // 16KB
 pub const ROOT_ZONE_DTB_ADDR: u64 = 0x8f000000;
 pub const ROOT_ZONE_KERNEL_ADDR: u64 = 0x90000000;
 pub const ROOT_ZONE_ENTRY: u64 = 0x90000000;
-pub const ROOT_ZONE_CPUS: u64 = 0xf;
+pub const ROOT_ZONE_CPUS: u64 = 0x7;
 
 pub const ROOT_ZONE_NAME: &str = "root-linux";
 

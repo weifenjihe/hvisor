@@ -207,7 +207,7 @@
 			riscv,pmpgranularity = <0x1000>;
 			riscv,pmpregions = <0x08>;
 			sifive,buserror = <0x0b>;
-			status = "okay";
+			status = "disabled";
 			timebase-frequency = <0xf4240>;
 			tlb-split;
 			numa-node-id = <0x00>;
@@ -3061,6 +3061,12 @@
 		device_type = "memory";
 		reg = <0x00 0x80000000 0x04 0x00>;
 		numa-node-id = <0x00>;
+	};
+
+	hvisor_virtio_device {
+		compatible = "hvisor";
+    	interrupt-parent = <0x10>;
+    	interrupts = <0x20>;
 	};
 
 	reserved-memory {
