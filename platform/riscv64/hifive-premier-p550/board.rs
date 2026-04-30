@@ -298,7 +298,8 @@ pub const HW_IRQS: [u32; 28] = [
 ];
 
 // irqs belong to the root zone.
-pub const ROOT_ZONE_IRQS: [u32; 28] = [
+pub const ROOT_ZONE_IRQS: [u32; 29] = [
+    0x20,
     0x39,
     0x4f, // emmc
     0x51, // sd-card

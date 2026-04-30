@@ -2,7 +2,7 @@
     "arch": "riscv64",
     "name": "sel4",
     "zone_id": 1,
-    "cpus": [2],
+    "cpus": [3],
     "memory_regions": [
         {
             "type": "ram",
@@ -35,7 +35,7 @@
             "size": "0x1000"
         }
     ],
-    "interrupts": [48, 76],
+    "interrupts": [7,100 ],
     "ivc_configs": [],
     "kernel_filepath": "./virtio_demo-image-riscv-hifive-p550",
     "dtb_filepath": "null",
