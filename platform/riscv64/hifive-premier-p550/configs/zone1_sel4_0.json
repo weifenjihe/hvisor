@@ -17,12 +17,6 @@
             "size": "0x80000"
         },
         {
-            "type": "ram",
-            "physical_start": "0x9400000",
-            "virtual_start":  "0x9400000",
-            "size": "0x10000"
-        },
-        {
             "type": "io",
             "physical_start": "0x50900000",
             "virtual_start":  "0x50900000",
