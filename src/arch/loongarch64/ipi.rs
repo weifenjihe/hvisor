@@ -201,6 +201,23 @@ pub fn ecfg_ipi_enable() {
     );
 }
 
+/// Host interrupt mask used while a LoongArch guest timer is passed through.
+///
+/// `GCFG.TOTI=0` routes the constant timer directly to the guest. Keeping the
+/// host TIMER line enabled at the same time can make a guest oneshot surface as
+/// a host interrupt while handling an IPI. If the host acknowledges that edge,
+/// the guest never runs its clockevent handler and therefore never rearms the
+/// next event.
+pub fn ecfg_guest_timer_passthrough() {
+    let lie = LineBasedInterrupt::IPI;
+    ecfg::set_lie(lie);
+    debug!(
+        "guest timer passthrough on cpu {}, host lie: {:?}",
+        this_cpu_id(),
+        lie
+    );
+}
+
 pub fn ecfg_ipi_disable() {
     let mut lie_ = ecfg::read().lie();
     lie_ = lie_ & !LineBasedInterrupt::IPI;

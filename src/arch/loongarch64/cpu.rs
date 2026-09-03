@@ -62,6 +62,12 @@ impl ArchCpu {
     pub fn run(&mut self) -> ! {
         assert!(this_cpu_id() == self.get_cpuid());
         this_cpu_data().activate_gpm();
+        // A stopped vCPU starts a new timer lifetime. Do not inherit an expired
+        // oneshot (or its recovery bookkeeping) from the previous run.
+        super::trap::reset_guest_timer_state();
+        // The guest constant timer is hardware-passthrough, so the host must
+        // only take the hvisor IPI doorbell while the guest is running.
+        ecfg_guest_timer_passthrough();
         this_cpu_data().vcpu_state.store(VcpuState::Running);
         if !self.init {
             self.init(this_cpu_data().cpu_on_entry, this_cpu_data().id, 0);
@@ -132,8 +138,10 @@ impl ArchCpu {
         }
         info!("loongarch64: ArchCpu::idle: cpuid={}", self.get_cpuid());
         this_cpu_data().vcpu_state.store(VcpuState::Stopped);
-        // enable ipi on ecfg
-        ecfg_ipi_enable();
+        super::trap::reset_guest_timer_state();
+        // A parked CPU only needs the wakeup IPI. In particular, do not let a
+        // stale guest timer interrupt enter the host idle loop.
+        ecfg_guest_timer_passthrough();
         // The trap vector is installed with interrupts disabled. Enable them only
         // after this CPU has valid trap context and stack pointers in SAVE3/SAVE4.
         super::trap::enable_global_interrupt();

@@ -31,6 +31,7 @@ use crate::PHY_TO_DMW_UNCACHED;
 use core::arch;
 use core::arch::asm;
 use core::panic;
+use core::sync::atomic::{AtomicUsize, Ordering};
 use loongArch64::cpu;
 use loongArch64::register;
 use loongArch64::register::ecfg::LineBasedInterrupt;
@@ -81,6 +82,14 @@ const GLOBAL_TRAP_CONTEXT_HELPER_PER_CPU_INITDATA: Mutex<TrapContextHelper> =
     Mutex::new(TrapContextHelper::new());
 pub static GLOBAL_TRAP_CONTEXT_HELPER_PER_CPU: [Mutex<TrapContextHelper>; MAX_CPU_NUM] =
     [GLOBAL_TRAP_CONTEXT_HELPER_PER_CPU_INITDATA; MAX_CPU_NUM];
+
+/// Last enabled guest timer configuration observed before returning to a vCPU.
+/// It lets us distinguish an expired oneshot from an intentionally disabled
+/// timer if expiry happens while the CPU is temporarily in hypervisor mode.
+static LAST_GUEST_TCFG: [AtomicUsize; MAX_CPU_NUM] = {
+    const INIT: AtomicUsize = AtomicUsize::new(0);
+    [INIT; MAX_CPU_NUM]
+};
 
 pub fn install_trap_vector() {
     // force disable INT here
@@ -220,17 +229,6 @@ fn handle_page_modify_fault() {
 pub fn trap_handler(mut ctx: &mut ZoneContext) {
     trace!("loongarch64: trap_handler: ctx addr = {:p}", &ctx);
 
-    // save timer
-    let delta;
-    let ticks = ctx.gcsr_tval;
-    let cfg = ctx.gcsr_tcfg;
-    if ticks < cfg {
-        delta = ticks;
-    } else {
-        delta = 0;
-    }
-    let expire = ktime_get() + delta;
-
     // dump trap csr regs
     let estat_ = estat::read();
     let ecode = estat_.ecode();
@@ -257,9 +255,7 @@ pub fn trap_handler(mut ctx: &mut ZoneContext) {
             era_.raw(),
         );
 
-    let mut is_idle = false;
     if ecode == ECODE_GSPR && badi_.inst() == 0b0000_0110_0100_1000_1000_0000_0000_0000 {
-        is_idle = true;
         ctx.sepc += 4;
         // just return to guest
         unsafe {
@@ -289,46 +285,10 @@ pub fn trap_handler(mut ctx: &mut ZoneContext) {
         ctx,
     );
 
-    // restore timer
-    let cfg = ctx.gcsr_tcfg;
-
-    ctx.gcsr_tcfg = 0;
-
-    // restore GCSR_ESTAT and GCSR_TCFG
-    ctx.gcsr_estat = 0;
-    ctx.gcsr_tcfg = 0;
-
-    debug!("loongarch64: trap_handler: restore timer, cfg={:#x}", cfg);
-
-    if cfg & 1 == 0 {
-        // guest has disabled timer, we just restore the tval
-        ctx.gcsr_tval = 0;
-    } else {
-        let ticks = ctx.gcsr_tval;
-        let estat = ctx.gcsr_estat;
-
-        if !((cfg & 2) != 0 && (ticks > cfg)) {
-            ctx.gcsr_tval = 0; // inject irq
-            let cpu_timer = 1usize << 11;
-            if estat & cpu_timer == 0 {
-                ctx.gcsr_ticlr = 1; // clear timer interrupt
-            }
-        } else {
-            let now = ktime_get();
-            let mut __delta = 0;
-            if now < expire {
-                __delta = expire - now;
-            } else if (cfg & 2) != 0 {
-                // tcfg[63:2] || 00 is tval
-                let period = cfg & (0xffff_ffff_ffff_fffc);
-                __delta = now - expire;
-                __delta = period - (__delta % period);
-                // kvm queued guest timer irq injection here but we do nothing here
-            }
-
-            ctx.gcsr_tval = __delta;
-        }
-    }
+    // TCFG/TVAL/ESTAT/TICLR remain live in the hardware guest CSR bank. The
+    // trap return path deliberately does not restore their context shadows.
+    // Touching those shadows here cannot compensate elapsed time and can hide
+    // a pending guest clockevent.
 
     debug!("loongarch64: trap_handler: return");
 
@@ -643,6 +603,7 @@ pub fn _vcpu_return(ctx: usize) -> ! {
 
     // Enable interrupt
     prmd::set_pie(true);
+    recover_lost_guest_ti();
     trace!(
         "loongarch64: _vcpu_return: calling _hyp_trap_return with ctx = {:#x}",
         ctx
@@ -1260,6 +1221,7 @@ fn imm12toi64(imm12: usize) -> isize {
 const INT_IPI: usize = 12;
 const IPI_BIT: usize = 1 << 12;
 const TIMER_BIT: usize = 1 << 11;
+const INT_TIMER: usize = 11;
 const HWI0: usize = 1 << 2;
 const HWI1: usize = 1 << 3;
 const HWI2: usize = 1 << 4;
@@ -1269,9 +1231,80 @@ const HWI5: usize = 1 << 7;
 const HWI6: usize = 1 << 8;
 const HWI7: usize = 1 << 9;
 
+const CSR_TCFG_EN: usize = 1;
+const CSR_TCFG_PERIODIC: usize = 1 << 1;
+const GUEST_TIMER_KICK_TCFG: usize = CSR_TCFG_EN | 0x100;
+
+/// Clear timer hardware and recovery state at a stopped-to-running boundary.
+/// This function must only be called while the vCPU is not Running.
+pub fn reset_guest_timer_state() {
+    let cpu = this_cpu_id();
+    LAST_GUEST_TCFG[cpu].store(0, Ordering::Relaxed);
+    write_gcsr_tcfg(0);
+    write_gcsr_ticlr(1);
+    if estat::read().is() & TIMER_BIT != 0 {
+        ticlr::clear_timer_interrupt();
+    }
+}
+
+/// Recover a guest oneshot that expires during a hypervisor/IPI window.
+///
+/// With `GCFG.TOTI=0`, normal timer delivery is direct to the guest. On a
+/// oneshot expiry outside guest mode, however, hardware clears TCFG.EN and may
+/// leave TI in the host ESTAT. Preserve that edge by injecting Guest TI before
+/// acknowledging the host copy.
+fn recover_lost_guest_ti() {
+    if !this_cpu_data().vcpu_state.is_running() {
+        return;
+    }
+
+    let cpu = this_cpu_id();
+    let tcfg = read_gcsr_tcfg();
+    let guest_ti = read_gcsr_estat() & TIMER_BIT != 0;
+    let host_ti = estat::read().is() & TIMER_BIT != 0;
+
+    if tcfg & CSR_TCFG_EN != 0 {
+        LAST_GUEST_TCFG[cpu].store(tcfg, Ordering::Relaxed);
+    }
+
+    if guest_ti {
+        if tcfg & CSR_TCFG_EN == 0 {
+            LAST_GUEST_TCFG[cpu].store(0, Ordering::Relaxed);
+        }
+        if host_ti {
+            ticlr::clear_timer_interrupt();
+        }
+        return;
+    }
+
+    let last = LAST_GUEST_TCFG[cpu].load(Ordering::Relaxed);
+    let expired_oneshot = last & CSR_TCFG_EN != 0
+        && last & CSR_TCFG_PERIODIC == 0
+        && tcfg & CSR_TCFG_EN == 0
+        && read_gcsr_tval() > last;
+
+    if !host_ti && !expired_oneshot {
+        return;
+    }
+
+    inject_irq(INT_TIMER, false);
+
+    // Consume the remembered edge. If direct ESTAT injection is unavailable
+    // on a CPU revision, arm a very short oneshot as a hardware fallback.
+    LAST_GUEST_TCFG[cpu].store(0, Ordering::Relaxed);
+    if read_gcsr_estat() & TIMER_BIT == 0 && tcfg & CSR_TCFG_EN == 0 {
+        write_gcsr_tcfg(GUEST_TIMER_KICK_TCFG);
+        LAST_GUEST_TCFG[cpu].store(GUEST_TIMER_KICK_TCFG, Ordering::Relaxed);
+    }
+
+    if estat::read().is() & TIMER_BIT != 0 {
+        ticlr::clear_timer_interrupt();
+    }
+}
+
 /// handle loongarch64 interrupts here
 fn handle_interrupt(is: usize) {
-    // Handle IPI interrupts
+    // Multiple bits can be pending together; do not return after handling IPI.
     if is & IPI_BIT != 0 {
         let cpu_id = this_cpu_id();
         let ipi_status = get_ipi_status();
@@ -1298,30 +1331,38 @@ fn handle_interrupt(is: usize) {
                 cpu_id, unhandled
             );
         }
-        return;
     }
 
-    // Handle timer interrupts
     if is & TIMER_BIT != 0 {
-        debug!("Timer interrupt received");
-        loongArch64::register::ticlr::clear_timer_interrupt();
-        return;
+        if this_cpu_data().vcpu_state.is_running() {
+            recover_lost_guest_ti();
+        } else {
+            debug!("Timer interrupt received while vCPU is stopped");
+            ticlr::clear_timer_interrupt();
+        }
     }
 
-    // Handle hardware interrupts (HWI)
     let hwi_mask = HWI0 | HWI1 | HWI2 | HWI3 | HWI4 | HWI5 | HWI6 | HWI7;
-    if is & hwi_mask != 0 {
+    // ESTAT.IS includes masked passthrough HWI bits. Only report HWI that the
+    // host actually enabled, otherwise every IPI can look like a host HWI.
+    let enabled_hwi = ecfg::read().lie().bits() & hwi_mask;
+    if is & enabled_hwi != 0 {
         let cpu_id = this_cpu_id();
         let sr = get_extioi_sr();
         warn!(
             "CPU {} received HWI interrupt, status = {:#x}, extioi status: {}",
             cpu_id, is, sr
         );
-        return;
     }
 
-    // Handle unknown interrupts
-    error!("Received unhandled interrupt, status = {:#x}", is);
+    let known = IPI_BIT | TIMER_BIT | hwi_mask;
+    if is & !known != 0 {
+        error!(
+            "Received unhandled interrupt bits {:#x}, status = {:#x}",
+            is & !known,
+            is
+        );
+    }
 }
 
 /// hypercall handler
